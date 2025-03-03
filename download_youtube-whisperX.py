@@ -64,45 +64,35 @@ def split_audio_sliding(wav_file, segment_duration=600, overlap=30):
     print(f"Created {len(segments)} overlapping segments.")
     return segments
 
-def transcribe_segment_local(segment_file, retries=3, backoff_factor=2):
+def transcribe_segment_whisperx(segment_file, model, device="cpu"):
     """
-    Placeholder for a local API transcription function.
-    This function is kept for backward compatibility.
+    Transcribe an audio segment using WhisperX locally.
+    Returns the transcription along with word-level timestamps.
     """
-    api_url = "http://localhost:8000/v1/audio/transcriptions"  # Local API endpoint
-    for attempt in range(retries):
-        try:
-            with open(segment_file, "rb") as f:
-                files = {"file": f}
-                data = {"language": "en"}
-                import requests  # Imported here to keep dependency local if not using API
-                response = requests.post(api_url, files=files, data=data, timeout=300)
-            if response.status_code == 200:
-                result = response.json()
-                return result.get("text", "")
-            else:
-                print(f"Segment {segment_file} failed with status {response.status_code}. Retrying...")
-        except Exception as e:
-            print(f"Error transcribing {segment_file}: {e}. Retrying...")
-        time.sleep(backoff_factor ** attempt)
-    return ""
+    import whisperx
 
-def transcribe_segment_faster_local(segment_file, model):
-    """
-    Transcribe an audio segment using the faster-whisper Python library locally.
-    Retrieves both the transcription and word-level timestamps.
-    """
-    # Use the faster-whisper model's transcribe method with word timestamps enabled.
-    segments, info = model.transcribe(segment_file, beam_size=5, word_timestamps=True)
+    # Step 1: Transcribe the segment using WhisperX model
+    print(f"WhisperX transcribing {segment_file} ...")
+    result = model.transcribe(segment_file, beam_size=5)
+    
+    # Determine the language from the transcription result
+    language = result.get("language", "en")
+    
+    # Step 2: Load alignment model and metadata for the detected language
+    align_model, metadata = whisperx.load_align_model(language, device)
+    
+    # Step 3: Align the transcription segments to get word-level timestamps
+    result_aligned = whisperx.align(result["segments"], align_model, metadata, segment_file, device)
+    
+    # Build the final transcription text and collect word-level timestamps
     transcription = ""
     word_timestamps = []
-    # Process each segment returned by the model
-    for segment in segments:
-        transcription += segment.text + " "
-        # If available, gather word-level details
-        if hasattr(segment, "words") and segment.words is not None:
-            word_timestamps.extend(segment.words)
+    for segment in result_aligned["segments"]:
+        transcription += segment["text"].strip() + " "
+        if "words" in segment:
+            word_timestamps.extend(segment["words"])
     transcription = transcription.strip()
+    
     return transcription + "\nWord Timestamps: " + str(word_timestamps)
 
 def seconds_to_hms(seconds):
@@ -113,11 +103,11 @@ def seconds_to_hms(seconds):
     return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
 
 def main():
-    youtube_url = "https://www.youtube.com/shorts/iIQs4OV9HvE"
+    youtube_url = "https://www.youtube.com/watch?v=TOQtJch3kGk"
     
     # Parameter to choose transcription method:
-    # Set to True to use faster-whisper locally; False to use the local API method.
-    use_faster_local = True
+    # Set to True to use WhisperX locally; False to use the local API method.
+    use_whisperx_local = True
 
     # Step 1: Download audio and convert to WAV
     audio_mp4 = download_audio(youtube_url)
@@ -126,17 +116,18 @@ def main():
     # Step 2: Create overlapping sliding window segments (10 min each with 30 sec overlap)
     segments = split_audio_sliding(audio_wav, segment_duration=600, overlap=30)
 
-    # If using faster-whisper locally, load the model once.
-    if use_faster_local:
+    # If using WhisperX locally, load the model once.
+    if use_whisperx_local:
         try:
-            from faster_whisper import WhisperModel
+            import whisperx
         except ImportError:
-            print("faster-whisper is not installed. Please install it via 'pip install faster-whisper'")
+            print("WhisperX is not installed. Please install it via 'pip install whisperx'")
             return
         # Load the model. Adjust the model name, device, and compute_type as needed.
-        model = WhisperModel("large-v2", device="cpu", compute_type="int8")
+        model = whisperx.load_model("large", device="cpu", compute_type="int8")
+        device = "cpu"  # Change to "cuda" if you have a compatible GPU.
     else:
-        model = None  # Not used if not using faster-whisper locally
+        model = None
 
     # Step 3: Transcribe each segment and accumulate results with time markers
     final_transcription = ""
@@ -145,10 +136,11 @@ def main():
         start_time_sec = idx * step
         time_marker = seconds_to_hms(start_time_sec)
         print(f"Transcribing segment {idx} (start: {time_marker})...")
-        if use_faster_local:
-            text = transcribe_segment_faster_local(seg_file, model)
+        if use_whisperx_local:
+            text = transcribe_segment_whisperx(seg_file, model, device=device)
         else:
-            text = transcribe_segment_local(seg_file)
+            # Fallback: use some local API or other transcription method
+            text = "Transcription method not implemented for this mode."
         final_transcription += f"--- Segment {idx} (start: {time_marker}) ---\n{text}\n\n"
 
     # Step 4: Save final transcription to a text file in TEMP_DIR

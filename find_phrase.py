@@ -31,7 +31,7 @@ def find_phrase_in_transcription(transcription_file, phrase):
 
 def main():
     transcription_file = "./temp/transcription.txt"  # Update if needed
-    phrase = "so a lot of people"
+    phrase = "stop"
     find_phrase_in_transcription(transcription_file, phrase)
 
 if __name__ == "__main__":
