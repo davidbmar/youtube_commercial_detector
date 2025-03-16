@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Define constants
 DEFAULT_TEMP_DIR = "./temp"
 DEFAULT_BATCH_SIZE = 5  # Process 5 videos at a time
-DEFAULT_S3_BUCKET = "youtube-transcripts"
+DEFAULT_S3_BUCKET = "2025-03-15-youtube-transcripts"
 DEFAULT_S3_PREFIX = "transcripts"
 DEFAULT_RESULTS_PREFIX = "results"
 
@@ -47,7 +47,10 @@ class YouTubePhraseScanner:
         # Initialize AWS clients
         self.s3 = boto3.client('s3', region_name=region)
         self.sqs = boto3.client('sqs', region_name=region) if queue_url else None
-        
+    
+        # Check the bucket exists for writing.
+        self.ensure_bucket_exists()
+
         # Create temp directory
         os.makedirs(temp_dir, exist_ok=True)
         
@@ -118,6 +121,31 @@ class YouTubePhraseScanner:
                 # Continue with next video
         
         return batch_results
+
+    def ensure_bucket_exists(self):
+        """Check if the S3 bucket exists and create it if it doesn't"""
+        try:
+            self.s3.head_bucket(Bucket=self.s3_bucket)
+            logger.info(f"S3 bucket '{self.s3_bucket}' already exists")
+        except self.s3.exceptions.ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == '404':
+                try:
+                    # Create the bucket
+                    if self.region == 'us-east-1':
+                        self.s3.create_bucket(Bucket=self.s3_bucket)
+                    else:
+                        self.s3.create_bucket(
+                            Bucket=self.s3_bucket,
+                            CreateBucketConfiguration={'LocationConstraint': self.region}
+                        )
+                    logger.info(f"Created S3 bucket '{self.s3_bucket}'")
+                except Exception as create_error:
+                    logger.error(f"Error creating S3 bucket: {str(create_error)}")
+                    raise
+            else:
+                logger.error(f"Error checking S3 bucket: {str(e)}")
+                raise
 
     def _process_single_video(self, youtube_url, phrase, video_temp_dir):
         """Process a single YouTube video"""
