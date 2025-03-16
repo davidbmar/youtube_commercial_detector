@@ -6,6 +6,7 @@ import shutil
 import argparse
 import json
 import boto3
+import sys
 import time
 import uuid
 import logging
@@ -98,6 +99,11 @@ class YouTubePhraseScanner:
             os.makedirs(video_temp_dir, exist_ok=True)
             
             try:
+                # Then before processing:
+                if results_exist_in_s3(video_id):
+                     logging.info(f"Results for video {video_id} already exist in S3, skipping")
+                     continue  # Skip to next video in queue 
+
                 logger.info(f"Processing video {video_id} with phrase '{current_phrase}'")
                 result = self._process_single_video(youtube_url, current_phrase, video_temp_dir)
                 
@@ -146,6 +152,21 @@ class YouTubePhraseScanner:
             else:
                 logger.error(f"Error checking S3 bucket: {str(e)}")
                 raise
+
+    #Check if this has already been processed, no sense in wasting compute money.
+    def results_exist_in_s3(video_id):
+        """Check if results for this video already exist in S3."""
+        try:
+            # Check if any results files exist for this video ID
+            prefix = f"results/{video_id}/"
+            response = s3_client.list_objects_v2(
+                Bucket="2025-03-15-youtube-transcripts",
+                Prefix=prefix
+            )
+            return 'Contents' in response and len(response['Contents']) > 0
+        except Exception as e:
+            logging.error(f"Error checking if results exist: {e}")
+            return False
 
     def _process_single_video(self, youtube_url, phrase, video_temp_dir):
         """Process a single YouTube video"""
@@ -311,13 +332,20 @@ class YouTubePhraseScanner:
             "files_with_phrase": files_with_phrase
         }
         return stats
-    
+
     def _get_video_from_queue(self):
-        """Get a YouTube URL from the SQS queue"""
-        if not self.queue_url:
-            logger.warning("No queue URL provided, returning default video")
-            return "https://www.youtube.com/watch?v=TOQtJch3kGk", None
+        # The queue_url isn't defined here, but it should be
+        # It should either be:
+        # 1. An instance variable set during initialization
+        queue_url = self.queue_url  # If it's stored as an instance variable
         
+        # 2. Or a parameter passed to this method
+        # def _get_video_from_queue(self, queue_url):
+        
+        if not queue_url:
+            logging.warning("No queue URL provided, exiting")
+            sys.exit(0)  # Exit with success code
+    
         try:
             # Get queue depth for monitoring
             queue_attributes = self.sqs.get_queue_attributes(
