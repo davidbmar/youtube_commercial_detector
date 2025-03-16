@@ -100,7 +100,7 @@ class YouTubePhraseScanner:
             
             try:
                 # Then before processing:
-                if results_exist_in_s3(video_id):
+                if self.results_exist_in_s3(video_id):
                      logging.info(f"Results for video {video_id} already exist in S3, skipping")
                      continue  # Skip to next video in queue 
 
@@ -154,13 +154,13 @@ class YouTubePhraseScanner:
                 raise
 
     #Check if this has already been processed, no sense in wasting compute money.
-    def results_exist_in_s3(video_id):
+    def results_exist_in_s3(self, video_id):
         """Check if results for this video already exist in S3."""
         try:
             # Check if any results files exist for this video ID
-            prefix = f"results/{video_id}/"
-            response = s3_client.list_objects_v2(
-                Bucket="2025-03-15-youtube-transcripts",
+            prefix = f"{DEFAULT_RESULTS_PREFIX}/{video_id}/"
+            response = self.s3.list_objects_v2(
+                Bucket=self.s3_bucket,
                 Prefix=prefix
             )
             return 'Contents' in response and len(response['Contents']) > 0
