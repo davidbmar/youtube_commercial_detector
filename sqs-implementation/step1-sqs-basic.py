@@ -1,88 +1,276 @@
 #!/usr/bin/python3
+import os
+import re
+import subprocess
+import shutil
 import argparse
 import json
 import boto3
 
+# Define the temporary directory
+DEFAULT_TEMP_DIR = "./temp"
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Send YouTube URLs to an SQS queue for processing."
-    )
-    parser.add_argument(
-        "--queue_name", "-q",
-        type=str,
-        default="2025-03-15-youtube-transcription-queue",
-        help="Name of the SQS queue to send messages to."
-    )
-    parser.add_argument(
-        "--region", "-r",
-        type=str,
-        default="us-east-2",
-        help="AWS region for the SQS queue. (Default: 'us-east-2')"
-    )
-    parser.add_argument(
-        "--account_id", "-a",
-        type=str,
-        default="635071011057",
-        help="AWS account ID."
-    )
-    parser.add_argument(
-        "--youtube_url", "-u",
-        type=str,
-        required=True,
-        help="YouTube URL to send to the queue."
+        description="Scan transcript files for a given phrase and report statistics."
     )
     parser.add_argument(
         "--phrase", "-p",
         type=str,
-        help="Optional phrase to search for (overrides default in processor)."
+        default="hustle",
+        help="The phrase to search for (can be multiple words). (Default: 'hustle')"
+    )
+    parser.add_argument(
+        "--temp_dir", "-t",
+        type=str,
+        default=DEFAULT_TEMP_DIR,
+        help=f"Path to the temporary directory containing transcript files (Default: '{DEFAULT_TEMP_DIR}')."
+    )
+    parser.add_argument(
+        "--queue_url", "-q",
+        type=str,
+        help="URL of the SQS queue to pull YouTube URLs from. If not provided, uses the default URL."
+    )
+    parser.add_argument(
+        "--region", "-r",
+        type=str,
+        default="us-east-1",
+        help="AWS region for the SQS queue. (Default: 'us-east-1')"
     )
     return parser.parse_args()
 
-def send_message_to_sqs(region, account_id, queue_name, youtube_url, phrase=None):
-    """Send a message to the SQS queue using the queue name instead of URL."""
-    sqs = boto3.resource('sqs', region_name=region)
+def clear_temp_dir(temp_dir):
+    """Delete and recreate the temporary directory."""
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs(temp_dir, exist_ok=True)
+
+def download_audio(youtube_url, temp_dir):
+    """Download audio-only stream from YouTube using pytubefix into temp_dir."""
+    from pytubefix import YouTube
+    yt = YouTube(youtube_url)
+    audio_stream = yt.streams.filter(only_audio=True).first()
+    audio_file = os.path.join(temp_dir, "audio.mp4")
+    audio_stream.download(output_path=temp_dir, filename="audio.mp4")
+    print(f"Downloaded audio file: {audio_file}")
+    return audio_file
+
+def convert_to_wav(input_file, temp_dir):
+    """Convert the MP4 audio file to WAV format using ffmpeg in temp_dir."""
+    output_file = os.path.join(temp_dir, "audio.wav")
+    subprocess.run(["ffmpeg", "-y", "-i", input_file, output_file], check=True)
+    print(f"Converted audio to WAV: {output_file}")
+    return output_file
+
+def get_audio_duration(wav_file):
+    """Get duration (in seconds) of the WAV file using ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", wav_file
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    duration = float(result.stdout.strip())
+    return duration
+
+def split_audio_sliding(wav_file, temp_dir, segment_duration=60, overlap=0):
+    """
+    Split the WAV file into non-overlapping segments.
+    With segment_duration=60 and overlap=0:
+      - Segment 0:  0 to 60 sec, Segment 1: 60 to 120 sec, etc.
+    Each segment is saved in temp_dir with names segment_XXX.wav.
+    Returns a list of segment file paths.
+    """
+    total_duration = get_audio_duration(wav_file)
+    segments = []
+    idx = 0
+    start_time = 0
+    while start_time < total_duration:
+        output_file = os.path.join(temp_dir, f"segment_{idx:03d}.wav")
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", str(start_time),
+            "-t", str(segment_duration),
+            "-i", wav_file,
+            output_file
+        ]
+        subprocess.run(cmd, check=True)
+        segments.append(output_file)
+        print(f"Created segment {idx} from {start_time:.0f} to {start_time + segment_duration:.0f} sec")
+        idx += 1
+        start_time += segment_duration
+    print(f"Created {len(segments)} segments.")
+    return segments
+
+def transcribe_segment_whisperx(segment_file, model, device="cpu"):
+    """
+    Transcribe an audio segment using WhisperX locally.
+    Returns the full transcription text with word-level timestamps.
+    """
+    import whisperx
+
+    print(f"WhisperX transcribing {segment_file} ...")
+    result = model.transcribe(segment_file)
+    language = result.get("language", "en")
+    align_model, metadata = whisperx.load_align_model(language, device)
+    result_aligned = whisperx.align(result["segments"], align_model, metadata, segment_file, device)
     
-    # Get the queue by name
-    queue = sqs.get_queue_by_name(
-        QueueName=queue_name
-    )
+    transcription = ""
+    for segment in result_aligned["segments"]:
+        transcription += segment["text"].strip() + " "
+    return transcription.strip()
+
+def scan_transcripts(temp_dir, phrase):
+    """Scan all transcript (.txt) files in temp_dir for the given phrase and compute statistics."""
+    txt_files = [f for f in os.listdir(temp_dir) if f.startswith("segment_") and f.endswith(".txt")]
+    txt_files = sorted(txt_files)
     
-    # Create message body
-    message = {
-        "youtube_url": youtube_url
+    total_occurrences = 0
+    total_words = 0
+    total_chars = 0
+    files_with_phrase = []
+    
+    for txt_file in txt_files:
+        file_path = os.path.join(temp_dir, txt_file)
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            # Use regex to count occurrences of the phrase (case-insensitive)
+            pattern = re.escape(phrase)
+            occurrences = re.findall(pattern, content, re.IGNORECASE)
+            count_occ = len(occurrences)
+            total_occurrences += count_occ
+            words = content.split()
+            total_words += len(words)
+            total_chars += len(content)
+            if count_occ > 0:
+                # Extract minute index from filename (e.g., segment_007.txt -> minute 7)
+                minute_idx = int(txt_file.split('_')[1].split('.')[0])
+                files_with_phrase.append((txt_file, minute_idx, count_occ))
+                
+    num_segments = len(txt_files)
+    video_duration_sec = num_segments * 60
+    
+    stats = {
+        "video_duration_sec": video_duration_sec,
+        "video_duration_min": video_duration_sec / 60,
+        "total_words": total_words,
+        "total_chars": total_chars,
+        "total_occurrences": total_occurrences,
+        "files_with_phrase": files_with_phrase
     }
+    return stats
+
+def get_message_from_sqs(queue_url, region):
+    """Get a message from the SQS queue."""
+    sqs = boto3.client('sqs', region_name=region)
     
-    # Add phrase if provided
-    if phrase:
-        message["phrase"] = phrase
-    
-    # Send message to SQS
-    response = queue.send_message(
-        MessageBody=json.dumps(message)
+    # Receive a message from the queue
+    response = sqs.receive_message(
+        QueueUrl=queue_url,
+        AttributeNames=['All'],
+        MaxNumberOfMessages=1,
+        MessageAttributeNames=['All'],
+        WaitTimeSeconds=1,  # Short polling for testing
+        VisibilityTimeout=300  # 5 minutes
     )
     
-    print(f"Message sent to SQS queue: {queue_name}")
-    print(f"YouTube URL: {youtube_url}")
-    if phrase:
-        print(f"Phrase: {phrase}")
-    print(f"Message ID: {response.get('MessageId')}")
-    
-    return response.get('MessageId')
+    # Check if a message was received
+    if 'Messages' in response and response['Messages']:
+        message = response['Messages'][0]
+        receipt_handle = message['ReceiptHandle']
+        
+        try:
+            # Parse the message body
+            body = json.loads(message['Body'])
+            
+            # Delete the message from the queue since we've processed it
+            sqs.delete_message(
+                QueueUrl=queue_url,
+                ReceiptHandle=receipt_handle
+            )
+            
+            # Return the YouTube URL
+            if 'youtube_url' in body:
+                print(f"Received YouTube URL from SQS: {body['youtube_url']}")
+                phrase = body.get('phrase', None)  # Check if a custom phrase was provided
+                return body['youtube_url'], phrase
+            else:
+                print("Error: Message does not contain a YouTube URL")
+                return None, None
+        except json.JSONDecodeError:
+            print("Error: Could not parse message body as JSON")
+            return None, None
+    else:
+        print("No messages available in the queue")
+        return None, None
 
 def main():
     args = parse_arguments()
+    phrase = args.phrase
+    temp_dir = args.temp_dir
+    queue_url = args.queue_url
+    region = args.region
+
+    # Clear out the temp directory
+    clear_temp_dir(temp_dir)
     
-    print(f"Sending message to queue: {args.queue_name} in region {args.region}")
+    # Default YouTube URL (used if not getting from SQS)
+    default_youtube_url = "https://www.youtube.com/watch?v=TOQtJch3kGk"
     
-    message_id = send_message_to_sqs(
-        args.region,
-        args.account_id,
-        args.queue_name,
-        args.youtube_url,
-        args.phrase
-    )
+    # Determine where to get the YouTube URL from
+    if queue_url:
+        print(f"Trying to get YouTube URL from SQS queue: {queue_url}")
+        youtube_url, custom_phrase = get_message_from_sqs(queue_url, region)
+        if youtube_url is None:
+            print("No URL found in queue, using default URL")
+            youtube_url = default_youtube_url
+        if custom_phrase:
+            print(f"Using custom phrase from message: '{custom_phrase}'")
+            phrase = custom_phrase
+    else:
+        youtube_url = default_youtube_url
     
-    print(f"Successfully sent message with ID: {message_id}")
+    print(f"Processing YouTube URL: {youtube_url}")
+    print(f"Searching for phrase: '{phrase}'")
+    
+    # Step 1: Download audio and convert to WAV.
+    audio_mp4 = download_audio(youtube_url, temp_dir)
+    audio_wav = convert_to_wav(audio_mp4, temp_dir)
+
+    # Step 2: Split audio into 60-second segments.
+    segments = split_audio_sliding(audio_wav, temp_dir, segment_duration=60, overlap=0)
+
+    # Step 3: Load the WhisperX model (using GPU on a 3070).
+    use_whisperx_local = True
+    if use_whisperx_local:
+        try:
+            import whisperx
+        except ImportError:
+            print("WhisperX is not installed. Please install it via 'pip install whisperx'")
+            return
+        model = whisperx.load_model("large", device="cuda", compute_type="float16")
+        device = "cuda"
+    else:
+        model = None
+
+    # Step 4: Transcribe each segment and save transcription in corresponding .txt file.
+    for seg_file in segments:
+        transcription = transcribe_segment_whisperx(seg_file, model, device=device)
+        txt_file = seg_file.replace(".wav", ".txt")
+        with open(txt_file, "w", encoding="utf-8") as f:
+            f.write(transcription)
+        print(f"Transcription for {seg_file} saved to {txt_file}")
+    
+    # Step 5: Scan all transcript files for the given phrase.
+    stats = scan_transcripts(temp_dir, phrase)
+    
+    print("\n--- Scan Results ---")
+    print(f"Video duration: {stats['video_duration_sec']} sec ({stats['video_duration_min']:.2f} minutes)")
+    print(f"Total words scanned: {stats['total_words']}")
+    print(f"Total characters scanned: {stats['total_chars']}")
+    print(f"Total occurrences of '{phrase}': {stats['total_occurrences']}")
+    print("Files (by minute) containing the phrase:")
+    for filename, minute_idx, occ in stats["files_with_phrase"]:
+        print(f"  - {filename} (Minute {minute_idx + 1}): {occ} occurrence(s)")
 
 if __name__ == "__main__":
     main()
