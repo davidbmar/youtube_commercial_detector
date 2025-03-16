@@ -1,0 +1,10 @@
+#First, send some youtube videos to the SQS queue to be processed.
+./send-video-to-sqs-queue.py -u https://www.youtube.com/watch?v=N_Nvr4ztBXs
+./send-video-to-sqs-queue.py -u https://www.youtube.com/watch?v=-UBaW1OIgTo
+
+#Next, process those in the SQS queue.
+#This is how to run the script where it pulls items off of the SQS queue.
+python scan-sqs-s3.py \
+  --queue_url https://sqs.us-east-2.amazonaws.com/635071011057/2025-03-15-youtube-transcription-queue \
+  --phrase "flea markets" \
+  --region us-east-2
