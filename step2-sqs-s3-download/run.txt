@@ -1,3 +1,7 @@
+export AWS_ACCESS_KEY_ID=YOUR_AWS_ACCESS_KEY_HERE
+export AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY_HERE
+export AWS_DEFAULT_REGION=us-east-2
+
 #First, send some youtube videos to the SQS queue to be processed.
 ./send-video-to-sqs-queue.py -u https://www.youtube.com/watch?v=N_Nvr4ztBXs
 ./send-video-to-sqs-queue.py -u https://www.youtube.com/watch?v=-UBaW1OIgTo
