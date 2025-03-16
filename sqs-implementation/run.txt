@@ -1,0 +1,4 @@
+python step1-sqs-sender.py \
+  --queue_url https://sqs.us-east-2.amazonaws.com/635071011057/2025-03-15-youtube-transcription-queue \
+  --youtube_url https://www.youtube.com/watch?v=rxMqbIm1PPo \
+  --phrase "flea markets"
