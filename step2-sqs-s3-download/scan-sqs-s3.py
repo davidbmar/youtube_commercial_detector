@@ -174,7 +174,6 @@ class YouTubePhraseScanner:
             logging.error(f"Error checking if results exist: {e}")
             return False
 
-
     def generate_video_list(self):
         """Generate a list of all video IDs in the S3 bucket and save to video_list.json"""
         try:
@@ -196,7 +195,7 @@ class YouTubePhraseScanner:
             # Write to a JSON file
             video_list_path = "video_list.json"
             with open(video_list_path, 'w') as f:
-                json.dump(video_ids, indent=2, f)
+                json.dump(video_ids, f, indent=2)  # CORRECTED LINE: moved indent=2 after f
             
             # Upload to S3
             self.s3.upload_file(
@@ -210,7 +209,6 @@ class YouTubePhraseScanner:
         except Exception as e:
             logger.error(f"Error generating video list: {str(e)}")
             return False
-
 
     def _process_single_video(self, youtube_url, phrase, video_temp_dir):
         """Process a single YouTube video"""
