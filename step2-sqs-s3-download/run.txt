@@ -5,6 +5,7 @@ export AWS_DEFAULT_REGION=us-east-2
 #First, send some youtube videos to the SQS queue to be processed.
 ./send-video-to-sqs-queue.py -u https://www.youtube.com/watch?v=MiA-DsGumxQ
 ./send-video-to-sqs-queue.py -u https://www.youtube.com/watch?v=b0XI-cbel1U
+./send-video-to-sqs-queue.py -u https://www.youtube.com/watch?v=F4MVSd7xf4U
 
 #Next, process those in the SQS queue.
 #This is how to run the script where it pulls items off of the SQS queue.
