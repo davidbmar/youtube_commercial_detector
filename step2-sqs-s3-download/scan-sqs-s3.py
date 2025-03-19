@@ -234,16 +234,17 @@ class YouTubePhraseScanner:
         
         # Return statistics
         return stats
-    
+
     def _download_audio(self, youtube_url, temp_dir):
         """Download audio-only stream from YouTube"""
         logger.info(f"Downloading audio from {youtube_url}")
         from pytubefix import YouTube
-        yt = YouTube(youtube_url)
+        yt = YouTube(youtube_url, client='WEB')  # Enable PoToken generation
         audio_stream = yt.streams.filter(only_audio=True).first()
         audio_file = os.path.join(temp_dir, "audio.mp4")
         audio_stream.download(output_path=temp_dir, filename="audio.mp4")
-        return audio_file
+        return audio_file    
+
     
     def _convert_to_wav(self, input_file, temp_dir):
         """Convert the MP4 audio file to WAV format"""
