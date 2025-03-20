@@ -574,6 +574,7 @@ def parse_arguments():
     return parser.parse_args()
 
 def main():
+
     args = parse_arguments()
 
     # At the beginning of your main function:
@@ -592,26 +593,39 @@ def main():
         batch_size=args.batch_size,
         use_gpu=not args.cpu
     )
+
+    # Fixed polling interval (in seconds)
+    poll_interval = 60  # 1 minute
     
-    # Process a batch of videos
-    logger.info(f"Starting batch processing with batch size {args.batch_size}")
-    batch_results = scanner.process_batch()
+    logger.info(f"Starting continuous processing with fixed {poll_interval}s polling interval")
     
-    # Print summary of batch results
-    logger.info("\n--- Batch Processing Summary ---")
-    logger.info(f"Processed {len(batch_results)} videos")
-    
-    for idx, result in enumerate(batch_results):
-        logger.info(f"\nVideo {idx+1}: {result['video_id']} ({result['youtube_url']})")
-        logger.info(f"Phrase: '{result['phrase']}'")
-        logger.info(f"Duration: {result['video_duration_min']:.2f} minutes")
-        logger.info(f"Total occurrences: {result['total_occurrences']}")
-        if result['files_with_phrase']:
-            logger.info("Occurrences by minute:")
-            for occurrence in result['files_with_phrase']:
-                logger.info(f"  - Minute {occurrence['minute']}: {occurrence['occurrences']} occurrence(s)")
-        else:
-            logger.info("No occurrences found")
+    while True:
+        try:
+            # Process a batch of videos
+            logger.info(f"Polling for jobs with batch size {args.batch_size}")
+            batch_results = scanner.process_batch()
+            
+            if batch_results and len(batch_results) > 0:
+                logger.info(f"Processed {len(batch_results)} videos, will check again in {poll_interval} seconds")
+            else:
+                logger.info(f"No videos to process, will check again in {poll_interval} seconds")
+            
+            # Clean up temporary directory to prevent disk space issues
+            if os.path.exists(args.temp_dir):
+                shutil.rmtree(args.temp_dir)
+            os.makedirs(args.temp_dir, exist_ok=True)
+            
+            # Update health check file for container orchestration
+            with open('/app/health_check.txt', 'w') as f:
+                f.write(str(time.time()))
+                
+            # Wait fixed interval before next poll
+            time.sleep(poll_interval)
+            
+        except Exception as e:
+            logger.error(f"Error in processing loop: {str(e)}")
+            logger.info(f"Restarting after error in {poll_interval} seconds")
+            time.sleep(poll_interval)
 
 if __name__ == "__main__":
     main()
