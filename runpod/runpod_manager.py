@@ -220,10 +220,26 @@ class RunPodManager:
         logger.info(f"Searching for GPU with pattern '{name_pattern}'")
         try:
             gpu_types = self.list_gpu_types()
+            
+            # First try exact match on ID
+            for gpu in gpu_types:
+                if gpu.get('id', '') == name_pattern:
+                    logger.info(f"Found exact match on ID: {name_pattern}")
+                    return gpu
+            
+            # Then try exact match on displayName
+            for gpu in gpu_types:
+                display_name = gpu.get('displayName', '')
+                if display_name and display_name.upper() == name_pattern.upper():
+                    logger.info(f"Found exact match on display name: {display_name}")
+                    return gpu
+            
+            # Finally try substring match
             for gpu in gpu_types:
                 # Try different fields where the name might appear
                 gpu_name = gpu.get('displayName', '') or gpu.get('name', '') or str(gpu.get('id', ''))
                 if name_pattern.upper() in gpu_name.upper():
+                    logger.info(f"Found partial match: {gpu_name} contains {name_pattern}")
                     return gpu
             
             logger.warning(f"No GPU found matching pattern '{name_pattern}'")

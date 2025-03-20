@@ -14,18 +14,18 @@ chmod +x runpod_cli.py
 # 2. Find a specific GPU by name (e.g., RTX 3070)
 ./runpod_cli.py find-gpu "3070"
 
-# 3. Create a pod with the Whisper image on an RTX 3070, using AWS secrets
+# 3. Create a pod with the Whisper image using AWS secrets (using full GPU ID from find-gpu)
 ./runpod_cli.py create-pod \
   --name "whisper-pod" \
   --image "davidbmar/whisper-runpod:latest" \
-  --gpu-type "3070" \
+  --gpu-type "NVIDIA GeForce RTX 3080" \  # Make sure to use the FULL GPU ID
   --use-aws-secrets
 
 # 4. Alternative way to create a pod with individual secret specification
 ./runpod_cli.py create-pod \
   --name "whisper-pod-alt" \
   --image "davidbmar/whisper-runpod:latest" \
-  --gpu-type "3070" \
+  --gpu-type "3080" \  # This should now work with the improved GPU finder
   --secret "aws_access_key_id" \
   --secret "aws_secret_access_key" \
   --secret "aws_region" \

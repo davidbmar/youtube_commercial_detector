@@ -119,13 +119,15 @@ def main():
             
             # Check if we need to look up the GPU type ID
             gpu_type_id = args.gpu_type
-            if not any(c.isdigit() for c in gpu_type_id):  # Heuristic to detect if it's a search pattern
+            # Always try to find the GPU by name unless it's clearly already an ID
+            if not gpu_type_id.startswith("gpu-"):  # Actual IDs often start with "gpu-"
                 # Try to find the GPU by name
                 gpu = manager.find_gpu_by_name(args.gpu_type)
                 if gpu:
                     gpu_type_id = gpu['id']
                     if not args.json:
                         print(f"Found GPU: {gpu.get('displayName', gpu['id'])}")
+                        print(f"Using GPU ID: {gpu_type_id}")
                 else:
                     print(f"Error: No GPU found matching '{args.gpu_type}'")
                     print("Available GPUs:")
