@@ -42,6 +42,9 @@ def main():
     create_pod_parser.add_argument("--cloud-type", default="COMMUNITY", choices=["COMMUNITY", "SECURE"], 
                                   help="Cloud type (COMMUNITY or SECURE)")
     create_pod_parser.add_argument("--env", action="append", help="Environment variables in KEY=VALUE format")
+    create_pod_parser.add_argument("--secret", action="append", help="Secret names to use (will be used to create env vars)")
+    create_pod_parser.add_argument("--use-aws-secrets", action="store_true", 
+                                 help="Use AWS credentials from secrets (aws_access_key_id, aws_secret_access_key, aws_region)")
     
     # Start pod command
     start_pod_parser = subparsers.add_parser("start-pod", help="Start a stopped pod")
@@ -101,6 +104,19 @@ def main():
                     key, value = env_var.split('=', 1)
                     env_vars[key] = value
             
+            # Process secrets
+            secrets = []
+            if args.secret:
+                secrets.extend(args.secret)
+                
+            # Add AWS secrets if requested
+            if args.use_aws_secrets:
+                secrets.extend(['aws_access_key_id', 'aws_secret_access_key', 'aws_region'])
+                # Map these to the standard AWS environment variable names
+                env_vars['AWS_ACCESS_KEY_ID'] = "{{ RUNPOD_SECRET_aws_access_key_id }}"
+                env_vars['AWS_SECRET_ACCESS_KEY'] = "{{ RUNPOD_SECRET_aws_secret_access_key }}"
+                env_vars['AWS_DEFAULT_REGION'] = "{{ RUNPOD_SECRET_aws_region }}"
+            
             # Check if we need to look up the GPU type ID
             gpu_type_id = args.gpu_type
             if not any(c.isdigit() for c in gpu_type_id):  # Heuristic to detect if it's a search pattern
@@ -123,7 +139,8 @@ def main():
                 image=args.image,
                 gpu_type_id=gpu_type_id,
                 cloud_type=args.cloud_type,
-                env_vars=env_vars
+                env_vars=env_vars,
+                secrets=secrets
             )
             
             if not args.json:

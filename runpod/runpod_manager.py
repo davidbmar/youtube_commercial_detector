@@ -70,7 +70,8 @@ class RunPodManager:
                  image: str, 
                  gpu_type_id: str,
                  cloud_type: str = "COMMUNITY",
-                 env_vars: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                 env_vars: Optional[Dict[str, str]] = None,
+                 secrets: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Create a new pod
         
@@ -80,6 +81,7 @@ class RunPodManager:
             gpu_type_id: GPU type ID (get from list_gpu_types())
             cloud_type: Cloud type (COMMUNITY or SECURE)
             env_vars: Environment variables to set in the container
+            secrets: List of secret names to use with the pod
             
         Returns:
             New pod information
@@ -97,9 +99,20 @@ class RunPodManager:
         if cloud_type:
             pod_params["cloud_type"] = cloud_type
         
-        # Add environment variables if specified
+        # Process environment variables
+        final_env_vars = {}
         if env_vars:
-            pod_params["env"] = env_vars
+            final_env_vars.update(env_vars)
+            
+        # Process secrets and add them to environment variables
+        if secrets:
+            for secret_name in secrets:
+                # Use RunPod's secret syntax
+                final_env_vars[secret_name] = f"{{{{ RUNPOD_SECRET_{secret_name} }}}}"
+                
+        # Add environment variables if we have any
+        if final_env_vars:
+            pod_params["env"] = final_env_vars
         
         try:
             return runpod.create_pod(**pod_params)
@@ -175,6 +188,23 @@ class RunPodManager:
                 return runpod.get_gpus()
         except Exception as e:
             logger.error(f"Error listing GPU types: {str(e)}")
+            raise
+    
+    def list_secrets(self) -> List[str]:
+        """
+        List available secrets (if supported by RunPod API)
+        
+        Returns:
+            List of secret names
+        """
+        logger.info("Listing available secrets")
+        try:
+            return runpod.get_secrets()
+        except (AttributeError, NotImplementedError):
+            logger.warning("Listing secrets not supported by RunPod API")
+            return []
+        except Exception as e:
+            logger.error(f"Error listing secrets: {str(e)}")
             raise
 
     def find_gpu_by_name(self, name_pattern: str) -> Optional[Dict[str, Any]]:
