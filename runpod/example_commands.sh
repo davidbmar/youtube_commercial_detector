@@ -18,20 +18,24 @@ chmod +x runpod_cli.py
 ./runpod_cli.py create-pod \
   --name "whisper-pod" \
   --image "davidbmar/whisper-runpod:latest" \
-  --gpu-type "NVIDIA GeForce RTX 3080" \  # Make sure to use the FULL GPU ID
+  --gpu-type "NVIDIA GeForce RTX 3080" \  
   --use-aws-secrets
 
 # 4. Alternative way to create a pod with individual secret specification
-./runpod_cli.py create-pod \
-  --name "whisper-pod-alt" \
-  --image "davidbmar/whisper-runpod:latest" \
-  --gpu-type "3080" \  # This should now work with the improved GPU finder
-  --secret "aws_access_key_id" \
-  --secret "aws_secret_access_key" \
-  --secret "aws_region" \
-  --env "AWS_ACCESS_KEY_ID={{ RUNPOD_SECRET_aws_access_key_id }}" \
-  --env "AWS_SECRET_ACCESS_KEY={{ RUNPOD_SECRET_aws_secret_access_key }}" \
-  --env "AWS_DEFAULT_REGION={{ RUNPOD_SECRET_aws_region }}"
+#./runpod_cli.py create-pod \
+#  --name "whisper-pod-alt" \
+#  --image "davidbmar/whisper-runpod:latest" \
+#  --gpu-type "3080" \  
+#  --secret "aws_access_key_id" \
+#  --secret "aws_secret_access_key" \
+#  --secret "aws_region" \
+#  --env "AWS_ACCESS_KEY_ID={{ RUNPOD_SECRET_aws_access_key_id }}" \
+#  --env "AWS_SECRET_ACCESS_KEY={{ RUNPOD_SECRET_aws_secret_access_key }}" \
+#  --env "AWS_DEFAULT_REGION={{ RUNPOD_SECRET_aws_region }}"
+#  The backslash is intrepreted wrong so just use it all one line like this:
+
+./runpod_cli.py create-pod --name "whisper-pod-alt" --image "davidbmar/whisper-runpod:latest" --gpu-type "3080" --secret "aws_access_key_id" --secret "aws_secret_access_key" --secret "aws_region" --env "AWS_ACCESS_KEY_ID={{ RUNPOD_SECRET_aws_access_key_id }}" --env "AWS_SECRET_ACCESS_KEY={{ RUNPOD_SECRET_aws_secret_access_key }}" --env "AWS_DEFAULT_REGION={{ RUNPOD_SECRET_aws_region }}"
+
 
 # 5. List all pods to get the pod ID
 ./runpod_cli.py list-pods
