@@ -235,15 +235,41 @@ class YouTubePhraseScanner:
         # Return statistics
         return stats
 
+    # Created a more robust download function for your Python code that:
+    # Tries yt-dlp first (the most reliable method for YouTube downloads)
+    # Falls back to PyTubeFix if yt-dlp fails
     def _download_audio(self, youtube_url, temp_dir):
-        """Download audio-only stream from YouTube"""
+        """Download audio-only stream from YouTube using yt-dlp (more reliable)"""
         logger.info(f"Downloading audio from {youtube_url}")
-        from pytubefix import YouTube
-        yt = YouTube(youtube_url, client='WEB')  # Enable PoToken generation
-        audio_stream = yt.streams.filter(only_audio=True).first()
-        audio_file = os.path.join(temp_dir, "audio.mp4")
-        audio_stream.download(output_path=temp_dir, filename="audio.mp4")
-        return audio_file    
+        output_file = os.path.join(temp_dir, "audio.mp4")
+        
+        try:
+            # First try using yt-dlp (more reliable)
+            logger.info(f"Attempting to download with yt-dlp")
+            subprocess.run([
+                "yt-dlp", 
+                "-f", "bestaudio[ext=m4a]", 
+                "-o", output_file,
+                youtube_url
+            ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            logger.info(f"Successfully downloaded audio with yt-dlp")
+            return output_file
+        except Exception as e:
+            logger.warning(f"yt-dlp download failed: {str(e)}")
+            
+            # Fallback to PyTubeFix
+            try:
+                logger.info(f"Attempting to download with PyTubeFix")
+                from pytubefix import YouTube
+                yt = YouTube(youtube_url)
+                audio_stream = yt.streams.filter(only_audio=True).first()
+                audio_stream.download(output_path=temp_dir, filename="audio.mp4")
+                logger.info(f"Successfully downloaded audio with PyTubeFix")
+                return output_file
+            except Exception as e2:
+                logger.error(f"All download methods failed: PyTubeFix error: {str(e2)}")
+                raise Exception(f"Failed to download audio: {str(e2)}")
 
     
     def _convert_to_wav(self, input_file, temp_dir):
