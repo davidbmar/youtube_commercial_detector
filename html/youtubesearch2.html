@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>YouTube Transcript Viewer</title>
     <style>
         body {
@@ -185,7 +188,7 @@
         const segmentsContainer = document.getElementById('segmentsContainer');
         
         // State variables
-        let videoIds = [];
+        let videoData = [];
         let currentVideoId = null;
         let transcriptSegments = [];
         
@@ -206,67 +209,66 @@
             fetchVideoList();
         }
         
-        // Fetch video list from S3
-        async function fetchVideoList() {
+        // Fetch video list
+        function fetchVideoList() {
             try {
-                // Use the proper S3 bucket URL format to access the video_list.json file
-                const listResponse = await fetch(`${S3_BUCKET_URL}/video_list.json`);
+                // Hardcoded list of video IDs from the provided JSON
+                const videoIds = [
+                  "8JGa62LBjpY",
+                  "F4MVSd7xf4U",
+                  "MiA-DsGumxQ",
+                  "QMInAfhIuTQ",
+                  "TOQtJch3kGk",
+                  "VChRPFUzJGA",
+                  "ZXtVvroop_U",
+                  "b0XI-cbel1U",
+                  "uRN2sQuK2CE",
+                  "wa_A0qY0anA"
+                ];
                 
-                if (!listResponse.ok) {
-                    throw new Error(`Could not load video list: ${listResponse.status}`);
-                }
-                
-                const data = await listResponse.json();
-                let ids = [];
-                
-                // Handle different JSON structures
-                if (Array.isArray(data)) {
-                    // If it's an array of strings or objects
-                    ids = data.map(item => {
-                        if (typeof item === 'string') {
-                            return item;
-                        } else if (item && item.id) {
-                            return item.id;
-                        }
-                        return null;
-                    }).filter(id => id !== null);
-                } else if (typeof data === 'object' && data !== null) {
-                    // If it's an object with keys as identifiers
-                    ids = Object.values(data).map(item => {
-                        if (typeof item === 'string') {
-                            return item;
-                        } else if (item && item.id) {
-                            return item.id;
-                        }
-                        return null;
-                    }).filter(id => id !== null);
-                }
-                
-                if (ids.length === 0) {
-                    throw new Error('No video IDs found in the data');
-                }
-                
-                // Set the video IDs
-                videoIds = ids;
+                // Create video objects from the IDs
+                videoData = videoIds.map((id, index) => ({
+                  id: id,
+                  title: `Video ${index + 1}`
+                }));
                 
                 // Populate the dropdown
-                populateDropdown(videoIds);
+                populateDropdown(videoData);
                 
                 // Hide loading message
                 loadingMessage.style.display = 'none';
                 
-                // Don't auto-select a video, let the user choose
-                playerContainer.style.display = 'none';
-                transcriptContainer.style.display = 'none';
+                // Try to fetch video titles in the background
+                fetchVideoTitles();
             } catch (error) {
+                console.error('Error loading videos:', error);
                 showError(`Error loading video list: ${error.message}`);
-                console.error('Error fetching video list:', error);
-                loadingMessage.textContent = 'Could not load video list. Please check console for details.';
+                loadingMessage.textContent = 'Could not load video list. Check console for details.';
+            }
+        }
+        
+        // Fetch video titles from YouTube
+        async function fetchVideoTitles() {
+            for (let i = 0; i < videoData.length; i++) {
+                try {
+                    const response = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoData[i].id}&format=json`);
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        videoData[i].title = data.title;
+                        populateDropdown(videoData);
+                    }
+                } catch (error) {
+                    console.warn(`Could not fetch title for video ${videoData[i].id}:`, error);
+                }
+                
+                // Small delay to avoid rate limiting
+                await new Promise(resolve => setTimeout(resolve, 200));
             }
         }
         
         // Populate dropdown with videos
-        function populateDropdown(ids) {
+        function populateDropdown(videos) {
             // Clear existing options
             videoSelect.innerHTML = '';
             
@@ -278,10 +280,10 @@
             videoSelect.appendChild(defaultOption);
             
             // Add video options
-            ids.forEach((id, index) => {
+            videos.forEach((video, index) => {
                 const option = document.createElement('option');
-                option.value = id;
-                option.textContent = `Video ${index + 1} - ${id}`;
+                option.value = video.id;
+                option.textContent = `${video.title || `Video ${index + 1}`} (${video.id})`;
                 videoSelect.appendChild(option);
             });
         }
@@ -290,10 +292,14 @@
         async function handleVideoSelect() {
             const selectedId = videoSelect.value;
             
+            // Clear search input and results
+            searchInput.value = '';
+            resultsContainer.innerHTML = '';
+            searchResults.style.display = 'none';
+            
             if (!selectedId) {
                 playerDiv.innerHTML = '';
                 transcriptContainer.style.display = 'none';
-                searchResults.style.display = 'none';
                 return;
             }
             
@@ -303,6 +309,9 @@
             loadingMessage.style.display = 'block';
             loadingMessage.textContent = 'Loading video and transcript...';
             
+            // Find current video data
+            const selectedVideo = videoData.find(video => video.id === selectedId);
+            
             // Display the YouTube player
             playerDiv.innerHTML = `
                 <iframe 
@@ -311,6 +320,16 @@
                     allowfullscreen
                 ></iframe>
             `;
+            
+            // If there's a title, show it above the player
+            if (selectedVideo && selectedVideo.title) {
+                const titleElement = document.createElement('h3');
+                titleElement.textContent = selectedVideo.title;
+                titleElement.style.textAlign = 'center';
+                titleElement.style.marginBottom = '10px';
+                playerDiv.insertBefore(titleElement, playerDiv.firstChild);
+            }
+            
             playerContainer.style.display = 'block';
             
             // Clear previous transcript
